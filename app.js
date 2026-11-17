@@ -12,7 +12,7 @@ const allowedOrigins = (process.env.CLIENT_URL || "")
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Postman / server-to-server request e origin thake na
+      // Postman
       if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
