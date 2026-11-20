@@ -2,7 +2,7 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { getCollections } from "../config/db.js";
 import { verifyToken, verifyTechnician } from "../middlewares/auth.js";
-import { CATEGORIES, SERVICE_MODES, escapeRegex, isObjectId } from "../utils/helpers.js";
+import { CATEGORIES, SERVICE_MODES, escapeRegex, getPaging, isObjectId } from "../utils/helpers.js";
 
 const router = Router();
 
@@ -22,7 +22,7 @@ function cleanServiceBody(body) {
   else if (!CATEGORIES.includes(data.category)) error = "Invalid category";
   else if (data.description.length < 20) error = "Description must be at least 20 characters";
   else if (!data.image) error = "Service image is required";
-  else if (!(data.basePrice > 0)) error = "Base price must be a positive number";
+  else if (!Number.isFinite(data.basePrice) || !(data.basePrice > 0)) error = "Base price must be a positive number";
   else if (!data.estimatedDuration) error = "Estimated duration is required";
   else if (!SERVICE_MODES.includes(data.serviceMode)) error = "Invalid service mode";
   else if (!data.serviceArea) error = "Service area is required";
@@ -51,10 +51,11 @@ async function getOwnedService(req, res) {
 
 router.get("/", async (req, res, next) => {
   try {
-    const search = String(req.query.search || "").trim();
+    const search = String(req.query.search || "").trim().slice(0, 80);
     const category = String(req.query.category || "");
     const mode = String(req.query.mode || "");
     const sort = String(req.query.sort || "newest");
+    const { page, limit, skip } = getPaging(req.query);
 
     const filter = { approvalStatus: "approved", isAvailable: true };
     if (CATEGORIES.includes(category)) filter.category = category;
@@ -64,15 +65,23 @@ router.get("/", async (req, res, next) => {
       filter.$or = [{ title: rx }, { category: rx }];
     }
 
+
     const sortMap = {
-      "price-asc": { basePrice: 1 },
-      "price-desc": { basePrice: -1 },
-      newest: { createdAt: -1 },
+      "price-asc": { basePrice: 1, _id: 1 },
+      "price-desc": { basePrice: -1, _id: 1 },
+      newest: { createdAt: -1, _id: -1 },
     };
 
     const { services } = await getCollections();
-    const data = await services.find(filter).sort(sortMap[sort] || sortMap.newest).toArray();
-    res.json({ success: true, data });
+    const [data, total] = await Promise.all([
+      services.find(filter).sort(sortMap[sort] || sortMap.newest).skip(skip).limit(limit).toArray(),
+      services.countDocuments(filter),
+    ]);
+    res.json({
+      success: true,
+      data,
+      pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    });
   } catch (err) {
     next(err);
   }
@@ -159,7 +168,7 @@ router.post("/", verifyToken, verifyTechnician, async (req, res, next) => {
   }
 });
 
-
+// TECHNICIAN: edit korle abar pending
 router.patch("/:id", verifyToken, verifyTechnician, async (req, res, next) => {
   try {
     const service = await getOwnedService(req, res);
@@ -175,7 +184,6 @@ router.patch("/:id", verifyToken, verifyTechnician, async (req, res, next) => {
   }
 });
 
-
 router.patch("/:id/availability", verifyToken, verifyTechnician, async (req, res, next) => {
   try {
     const service = await getOwnedService(req, res);
@@ -189,7 +197,7 @@ router.patch("/:id/availability", verifyToken, verifyTechnician, async (req, res
   }
 });
 
-// TECHNICIAN: delete
+
 router.delete("/:id", verifyToken, verifyTechnician, async (req, res, next) => {
   try {
     const service = await getOwnedService(req, res);

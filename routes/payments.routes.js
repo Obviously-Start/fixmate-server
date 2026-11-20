@@ -8,7 +8,7 @@ import { savePaidSession } from "../utils/savePayment.js";
 
 const router = Router();
 
-// Checkout session: 
+
 router.post("/create-checkout-session", verifyToken, verifyCustomer, async (req, res, next) => {
   try {
     const { bookingId } = req.body;
@@ -50,7 +50,7 @@ router.post("/create-checkout-session", verifyToken, verifyCustomer, async (req,
   }
 });
 
-// Success page verify
+
 router.get("/verify", verifyToken, verifyCustomer, async (req, res, next) => {
   try {
     const sessionId = String(req.query.session_id || "");
@@ -70,7 +70,7 @@ router.get("/verify", verifyToken, verifyCustomer, async (req, res, next) => {
   }
 });
 
-// Customer  payment history
+
 router.get("/my", verifyToken, verifyCustomer, async (req, res, next) => {
   try {
     const { payments } = await getCollections();

@@ -2,11 +2,11 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { getCollections } from "../config/db.js";
 import { verifyToken, verifyCustomer, verifyTechnician } from "../middlewares/auth.js";
-import { ACTIVE_STATUSES, STATUS_FLOW, isObjectId } from "../utils/helpers.js";
+import { ACTIVE_STATUSES, BOOKING_STATUSES, STATUS_FLOW, isObjectId } from "../utils/helpers.js";
 
 const router = Router();
 
-// CUSTOMER: repair request 
+
 router.post("/", verifyToken, verifyCustomer, async (req, res, next) => {
   try {
     const { serviceId, customerPhone, address, preferredDate, problemDescription } = req.body;
@@ -51,7 +51,7 @@ router.post("/", verifyToken, verifyCustomer, async (req, res, next) => {
       return res.status(403).json({ success: false, message: "You cannot request your own service" });
     }
 
-   
+    
     const duplicate = await bookings.findOne({
       serviceId,
       customerEmail: req.user.email,
@@ -61,6 +61,7 @@ router.post("/", verifyToken, verifyCustomer, async (req, res, next) => {
       return res.status(409).json({ success: false, message: "You already have an active request for this service" });
     }
 
+    const now = new Date();
     const doc = {
       serviceId,
       serviceTitle: service.title,
@@ -78,7 +79,8 @@ router.post("/", verifyToken, verifyCustomer, async (req, res, next) => {
       status: "requested",
       finalAmount: service.basePrice,
       paymentStatus: "unpaid",
-      createdAt: new Date(),
+      statusHistory: [{ status: "requested", changedAt: now }],
+      createdAt: now,
     };
     const result = await bookings.insertOne(doc);
     res.status(201).json({ success: true, message: "Repair request sent", data: { ...doc, _id: result.insertedId } });
@@ -87,7 +89,7 @@ router.post("/", verifyToken, verifyCustomer, async (req, res, next) => {
   }
 });
 
-// CUSTOMER: booking
+
 router.get("/my", verifyToken, verifyCustomer, async (req, res, next) => {
   try {
     const { bookings } = await getCollections();
@@ -98,7 +100,7 @@ router.get("/my", verifyToken, verifyCustomer, async (req, res, next) => {
   }
 });
 
-// CUSTOMER: "requested" 
+
 router.patch("/:id/cancel", verifyToken, verifyCustomer, async (req, res, next) => {
   try {
     if (!isObjectId(req.params.id)) {
@@ -113,7 +115,18 @@ router.patch("/:id/cancel", verifyToken, verifyCustomer, async (req, res, next) 
     if (booking.status !== "requested") {
       return res.status(400).json({ success: false, message: "Only a requested job can be cancelled" });
     }
-    await bookings.updateOne({ _id: booking._id }, { $set: { status: "cancelled" } });
+
+    
+    const result = await bookings.updateOne(
+      { _id: booking._id, customerEmail: req.user.email, status: "requested" },
+      {
+        $set: { status: "cancelled" },
+        $push: { statusHistory: { status: "cancelled", changedAt: new Date() } },
+      }
+    );
+    if (!result.matchedCount) {
+      return res.status(409).json({ success: false, message: "This request was just updated. Please refresh." });
+    }
     res.json({ success: true, message: "Booking cancelled" });
   } catch (err) {
     next(err);
@@ -124,7 +137,8 @@ router.patch("/:id/cancel", verifyToken, verifyCustomer, async (req, res, next) 
 router.get("/technician", verifyToken, verifyTechnician, async (req, res, next) => {
   try {
     const filter = { technicianEmail: req.user.email };
-    if (req.query.status) filter.status = String(req.query.status);
+    const status = String(req.query.status || "");
+    if (BOOKING_STATUSES.includes(status)) filter.status = status;
     const { bookings } = await getCollections();
     const data = await bookings.find(filter).sort({ createdAt: -1 }).toArray();
     res.json({ success: true, data });
@@ -159,13 +173,23 @@ router.patch("/:id/status", verifyToken, verifyTechnician, async (req, res, next
     const update = { status };
     if (status === "completed") {
       const amount = Number(finalAmount);
-      if (!(amount > 0)) {
+      if (!Number.isFinite(amount) || !(amount > 0)) {
         return res.status(400).json({ success: false, message: "finalAmount must be a number greater than 0" });
       }
-      update.finalAmount = amount;
+      update.finalAmount = Math.round(amount * 100) / 100;
     }
 
-    await bookings.updateOne({ _id: booking._id }, { $set: update });
+    
+    const result = await bookings.updateOne(
+      { _id: booking._id, technicianEmail: req.user.email, status: booking.status },
+      {
+        $set: update,
+        $push: { statusHistory: { status, changedAt: new Date() } },
+      }
+    );
+    if (!result.matchedCount) {
+      return res.status(409).json({ success: false, message: "This job was just updated. Please refresh." });
+    }
     res.json({ success: true, message: `Job marked as ${status}` });
   } catch (err) {
     next(err);

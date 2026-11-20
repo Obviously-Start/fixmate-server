@@ -1,10 +1,10 @@
+
 [build]
-  functions = "netlify/functions"
+  functions = "netlify/function"
 
 [functions]
   node_bundler = "esbuild"
 
-# Sob request ke Express function e pathay
 [[redirects]]
   from = "/*"
   to = "/.netlify/functions/api/:splat"

@@ -42,7 +42,27 @@ router.get("/stats", async (req, res, next) => {
 router.get("/users", async (req, res, next) => {
   try {
     const { users } = await getCollections();
-    const data = await users.find({}).sort({ createdAt: -1 }).toArray();
+
+    const data = await users
+      .find(
+        {},
+        {
+          projection: {
+            name: 1,
+            email: 1,
+            role: 1,
+            image: 1,
+            phone: 1,
+            area: 1,
+            bio: 1,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        }
+      )
+      .sort({ createdAt: -1 })
+      .toArray();
+
     res.json({ success: true, data });
   } catch (err) {
     next(err);
